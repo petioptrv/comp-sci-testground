@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 
 int binary_search(int target, int numbers[], int size);
 int binary_search_recurse(int target, int numbers[], int start, int end);
@@ -48,3 +49,25 @@ int binary_search_recurse(int target, int numbers[], int start, int end) {
 	
 	return res;
 }
+
+int hash(const char* key, const int m) {
+	int hash = 0; 
+	
+	for (int i = 0; i < key[i] != '\0'; ++i) {
+		hash = hash * 31 + key[i]; 
+	} 
+	
+	return abs(hash % m);
+}
+
+/* 
+key = the Key
+a = random number from 1 to p-1 
+b = random number from 0 to p-1 
+p = a prime number >=m 
+m = the size of the array 
+*/ 
+int int_hash(int key, int a, int b, int p, int m) { 
+	return ((a * key + b) % p) % m; 
+}
+
