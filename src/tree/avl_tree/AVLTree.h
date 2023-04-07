@@ -1,0 +1,14 @@
+//
+// Created by Petio Petrov on 2023-04-07.
+//
+
+#ifndef CODING_INTERVIEW_UNIVERSITY_AVLTREE_H
+#define CODING_INTERVIEW_UNIVERSITY_AVLTREE_H
+
+
+class AVLTree {
+
+};
+
+
+#endif //CODING_INTERVIEW_UNIVERSITY_AVLTREE_H
