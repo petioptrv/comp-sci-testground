@@ -22,7 +22,9 @@ add_executable(
         bst_test
         bst_test.cpp
 )
-target_link_libraries(bst_test PUBLIC GTest::gtest_main bst)
+target_link_libraries(
+        bst_test PUBLIC GTest::gtest_main GTest::gmock GTest::gtest bst
+)
 
 add_executable(
         avl_tree_test
