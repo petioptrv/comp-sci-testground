@@ -42,6 +42,7 @@ TEST(BST, remove) {
     tree.insert(3);
 
     ASSERT_THAT(tree.traverse(), ElementsAre(1, 2, 3, 4, 5, 10));
+    ASSERT_THAT(tree.traversePostOrder(), ElementsAre(1, 3, 4, 2, 5, 10));
 
     tree.remove(5);
 

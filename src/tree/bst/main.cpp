@@ -21,5 +21,11 @@ int main() {
 
     cout << "depth: " << tree.getDepth() << endl;
 
+    for (auto v: tree.traversePostOrder()) {
+        cout << v << " ";
+    }
+
+    cout << endl;
+
     return 0;
 }

@@ -37,7 +37,7 @@ public:
     void remove(T value);
     std::vector<T> traverse();
     std::vector<T> traverseInOrder();
-    void traverseInOrder(const std::function<void(T)>& function);
+    std::vector<T> traversePostOrder();
     T getMin();
     BSTNode<T> *getMin(BSTNode<T> *node);
     int getDepth();
@@ -157,6 +157,36 @@ std::vector<T> BST<T>::traverseInOrder() { // [ALGO CHALLENGE]
         nodeStack.pop();
         traversalVector.push_back(currentNode->value);
         currentNode = currentNode->rightChild;
+    }
+
+    return traversalVector;
+}
+
+template<class T>
+std::vector<T> BST<T>::traversePostOrder() {
+    std::vector<T> traversalVector;
+    std::stack<BSTNode<T>*> nodeStack;
+    std::stack<bool> nodeLeftChildDone;
+    auto currentNode = root;
+
+    while (currentNode != nullptr || !nodeStack.empty()) {
+        while (currentNode != nullptr) {
+            nodeStack.push(currentNode);
+            nodeLeftChildDone.push(false);
+            currentNode = currentNode->leftChild;
+        }
+
+        currentNode = nodeStack.top();
+        if (nodeLeftChildDone.top()) {
+            nodeStack.pop();
+            nodeLeftChildDone.pop();
+            traversalVector.push_back(currentNode->value);
+            currentNode = nullptr;
+        } else {
+            nodeLeftChildDone.pop();
+            nodeLeftChildDone.push(true);
+            currentNode = currentNode->rightChild;
+        }
     }
 
     return traversalVector;
