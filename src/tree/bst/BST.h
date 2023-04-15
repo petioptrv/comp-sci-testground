@@ -10,15 +10,17 @@
 #include <sstream>
 #include <iostream>
 #include <cstdio>
+#include <fstream>
+#include <functional>
 
 template<class T>
 class BSTNode {
 public:
     T value;
-    BSTNode<T>* leftChild;
-    BSTNode<T>* rightChild;
+    BSTNode<T> *leftChild;
+    BSTNode<T> *rightChild;
 
-    explicit BSTNode(const T& value);
+    explicit BSTNode(const T &value);
 };
 
 template<class T>
@@ -28,15 +30,17 @@ value(value), leftChild(nullptr), rightChild(nullptr) {}
 template<class T>
 class BST {
 public:
-    BSTNode<T>* root;
+    BSTNode<T> *root;
 
     BST();
     BST<T>* insert(T value);
     void remove(T value);
     std::vector<T> traverse();
     std::vector<T> traverseInOrder();
+    void traverseInOrder(const std::function<void(T)>& function);
     T getMin();
-    BSTNode<T>* getMin(BSTNode<T>* node);
+    BSTNode<T> *getMin(BSTNode<T> *node);
+    int getDepth();
     bool isEmpty();
 };
 
@@ -44,18 +48,18 @@ template<class T>
 BST<T>::BST(): root(nullptr) {};
 
 template<class T>
-BST<T>* BST<T>::insert(T value) {
+BST<T> *BST<T>::insert(T value) { // [ALGO CHALLENGE]
     if (isEmpty()) {
         root = new BSTNode<T>(value);
     } else {
-        BSTNode<T>* currentNode = root;
+        auto currentNode = root;
         while (currentNode->value != value) {
-            if (currentNode->value > value) {
+            if (value < currentNode->value) {
                 if (currentNode->leftChild == nullptr) {
                     currentNode->leftChild = new BSTNode<T>(value);
                 }
                 currentNode = currentNode->leftChild;
-            } else { // currentNode->value < value
+            } else {
                 if (currentNode->rightChild == nullptr) {
                     currentNode->rightChild = new BSTNode<T>(value);
                 }
@@ -63,13 +67,12 @@ BST<T>* BST<T>::insert(T value) {
             }
         }
     }
-    return this;
 }
 
 template<class T>
-void BST<T>::remove(T value) {
-    BSTNode<T>* currentNode = root;
-    BSTNode<T>* parent = nullptr;
+void BST<T>::remove(T value) { // [ALGO CHALLENGE]
+    BSTNode<T> *currentNode = root;
+    BSTNode<T> *parent = nullptr;
     bool isLeftChild = false;
 
     while (currentNode != nullptr && currentNode->value != value) {
@@ -139,7 +142,7 @@ std::vector<T> BST<T>::traverse() {
 }
 
 template<class T>
-std::vector<T> BST<T>::traverseInOrder() {
+std::vector<T> BST<T>::traverseInOrder() { // [ALGO CHALLENGE]
     std::vector<T> traversalVector;
     std::stack<BSTNode<T>*> nodeStack;
     BSTNode<T>* currentNode = root;
@@ -165,12 +168,42 @@ T BST<T>::getMin() {
 }
 
 template<class T>
-BSTNode<T>* BST<T>::getMin(BSTNode<T>* node) {
-    BSTNode<T>* currentNode = node;
+BSTNode<T> *BST<T>::getMin(BSTNode<T> *node) {
+    BSTNode<T> *currentNode = node;
     while (currentNode != nullptr && currentNode->leftChild != nullptr) {
         currentNode = currentNode->leftChild;
     }
     return currentNode;
+}
+
+template<class T>
+int BST<T>::getDepth() { // [ALGO CHALLENGE]
+    std::stack<BSTNode<T> *> nodeStack;
+    std::stack<int> heightStack;
+    BSTNode<T> *currentNode = root;
+    int depth = 0;
+    int maxDepth = 0;
+
+    while (currentNode != nullptr || !nodeStack.empty()) {
+        while (currentNode != nullptr) {
+            nodeStack.push(currentNode);
+            heightStack.push(depth);
+
+            currentNode = currentNode->leftChild;
+            depth += 1;
+        }
+
+        currentNode = nodeStack.top();
+        nodeStack.pop();
+        depth = heightStack.top();
+        heightStack.pop();
+        maxDepth = depth > maxDepth ? depth : maxDepth;
+
+        currentNode = currentNode->rightChild;
+        depth += 1;
+    }
+
+    return maxDepth;
 }
 
 template<class T>
@@ -181,7 +214,7 @@ bool BST<T>::isEmpty() {
 //  ======= VISUALIZATION =======
 
 template<class T>
-void buildViz(BST<T>* tree, std::string fileName) {
+void buildViz(BST<T> *tree, std::string fileName) {
     // Generate the DOT representation and save it to a file
     std::string dot = toDot(tree);
     std::ofstream dotFile(fileName + ".dot");
@@ -192,7 +225,7 @@ void buildViz(BST<T>* tree, std::string fileName) {
 }
 
 template<class T>
-std::string toDot(BST<T>* const tree) {
+std::string toDot(BST<T> *const tree) {
     std::stringstream ss;
     ss << "digraph BST {" << std::endl;
     ss << "  node [fontname=\"Arial\"];" << std::endl;
@@ -206,11 +239,13 @@ std::string toDot(BST<T>* const tree) {
 template<class T>
 void toDotHelper(std::stringstream &ss, BSTNode<T> *node) {
     if (node->leftChild) {
-        ss << "  " << node->value << " -> " << node->leftChild->value << ";" << std::endl;
+        ss << "  " << node->value << " -> " << node->leftChild->value << ";"
+           << std::endl;
         toDotHelper(ss, node->leftChild);
     }
     if (node->rightChild) {
-        ss << "  " << node->value << " -> " << node->rightChild->value << ";" << std::endl;
+        ss << "  " << node->value << " -> " << node->rightChild->value << ";"
+           << std::endl;
         toDotHelper(ss, node->rightChild);
     }
 }

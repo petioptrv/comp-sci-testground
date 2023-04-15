@@ -3,18 +3,23 @@
 //
 
 #include <fstream>
+#include <cstdlib>
 #include "BST.h"
 
 using namespace std;
 
 int main() {
+    int element;
     BST<int> tree;
-    tree.insert(1);
-    tree.insert(2);
-    tree.insert(3);
-    tree.insert(4);
+
+    for (int i = 0; i != 30; ++i) {
+        element = rand() % 1000;
+        tree.insert(element);
+    }
 
     buildViz(&tree, "bst");
+
+    cout << "depth: " << tree.getDepth() << endl;
 
     return 0;
 }
