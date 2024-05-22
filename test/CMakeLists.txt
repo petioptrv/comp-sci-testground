@@ -30,7 +30,9 @@ add_executable(
         avl_tree_test
         avl_tree_test.cpp
 )
-target_link_libraries(avl_tree_test PUBLIC GTest::gtest_main avl_tree)
+target_link_libraries(
+        avl_tree_test PUBLIC GTest::gtest_main GTest::gmock GTest::gtest avl_tree
+)
 
 include(GoogleTest)
 gtest_discover_tests(hashing_test)

@@ -13,6 +13,10 @@
 #include <fstream>
 #include <functional>
 
+// todo: add getters and setters to the node class to generalize the AVL algorithm
+// if there are setters, the AVL node can override them to affect its balance value
+// rather than having the tree do it
+
 template<class T>
 class BSTNode {
 public:
@@ -33,7 +37,7 @@ public:
     BSTNode<T> *root;
 
     BST();
-    BST<T>* insert(T value);
+    virtual void insert(T value);
     void remove(T value);
     std::vector<T> traverse();
     std::vector<T> traverseInOrder();
@@ -48,11 +52,11 @@ template<class T>
 BST<T>::BST(): root(nullptr) {};
 
 template<class T>
-BST<T> *BST<T>::insert(T value) { // [ALGO CHALLENGE]
+void BST<T>::insert(T value) { // [ALGO CHALLENGE]
+    auto currentNode = root;
     if (isEmpty()) {
         root = new BSTNode<T>(value);
     } else {
-        auto currentNode = root;
         while (currentNode->value != value) {
             if (value < currentNode->value) {
                 if (currentNode->leftChild == nullptr) {
