@@ -31,15 +31,13 @@ class TradeAggregator:
 
     def __init__(self, expected_clients: int):
         self.expected = expected_clients
-        self._lock = threading.Lock()
         self._buffer: dict[int, dict[int, float]] = defaultdict(dict)
 
     def add(self, trade_id: int, client_id: int, ts: float):
         """Add a receipt; return full dict if complete, else None."""
-        with self._lock:
-            self._buffer[trade_id][client_id] = ts
-            if len(self._buffer[trade_id]) == self.expected:
-                return self._buffer.pop(trade_id)
+        self._buffer[trade_id][client_id] = ts
+        if len(self._buffer[trade_id]) == self.expected:
+            return self._buffer.pop(trade_id)
         return None
 
 
@@ -62,7 +60,7 @@ class WSClient(threading.Thread):
             except (KeyError, json.JSONDecodeError):
                 return  # skip malformed
             recv_ts = time.time()
-            self.out_queue.put((trade_id, self.client_id, recv_ts))
+            self.out_queue.put_nowait((trade_id, self.client_id, recv_ts))
 
         def on_error(ws, error):
             print(f"[Client {self.client_id}] error: {error}")
@@ -107,7 +105,7 @@ def main():
     try:
         while time.time() - start_time < DURATION_SECONDS:
             try:
-                trade_id, client_id, ts = out_queue.get(timeout=0.5)
+                trade_id, client_id, ts = out_queue.get()
             except Empty:
                 continue
             completed = aggregator.add(trade_id, client_id, ts)
@@ -116,7 +114,6 @@ def main():
 
             # Compute per‑client delays for this trade
             first_ts = min(completed.values())
-            last_ts = max(completed.values())
             first_thread = min(completed, key=completed.get)
             last_thread = max(completed, key=completed.get)
 
