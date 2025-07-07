@@ -29,6 +29,7 @@ import time
 from datetime import datetime
 from typing import List
 
+import numpy as np
 import pandas as pd
 from ib_insync import IB, Stock, Order, util, OrderStatus
 
@@ -45,6 +46,7 @@ INIT_PCT_B = 0.05  # 5 % below last close
 AMEND_PCT_B = 0.09  # 9 % below last close
 INIT_PCT_C = 0.09  # 9 % below last close
 NEW_PCT_C = 0.05  # 5 % below last close
+SAMPLES_PER_EXPERIMENT = 10
 
 # ---------------------------------------------------------------------
 # CONNECT & GLOBALS
@@ -137,65 +139,72 @@ async def wait_cancel_order(order_id: int) -> datetime:
 # ---------------------------------------------------------------------
 async def aggressive_order_amend():
     """Place 15 % below last close, then amend to 10 % below."""
-    last_close = await last_1m_close()
-    initial_price = last_close * (1 - INIT_PCT_A)
-    amended_price = last_close * (1 - AMEND_PCT_A)
+    latencies_ms = []
 
-    order_id = ib.client.getReqId()
-    order = Order(orderId=order_id, action="BUY", totalQuantity=1,
-                  orderType="LMT", lmtPrice=round(initial_price, 2))
+    for _ in range(SAMPLES_PER_EXPERIMENT):
+        last_close = await last_1m_close()
+        initial_price = last_close * (1 - INIT_PCT_A)
+        amended_price = last_close * (1 - AMEND_PCT_A)
+        order_id = ib.client.getReqId()
+        order = Order(orderId=order_id, action="BUY", totalQuantity=1,
+                      orderType="LMT", lmtPrice=round(initial_price, 2))
 
-    # 1️⃣ Submit
-    ib.placeOrder(contract, order)
-    await wait_open_order(order_id)
+        # 1️⃣ Submit
+        ib.placeOrder(contract, order)
+        await wait_open_order(order_id)
 
-    # 2️⃣ Amend
-    order.lmtPrice = round(amended_price, 2)
-    t_cmd_amend = now_ns()
-    ib.placeOrder(contract, order)  # same orderId → modify
-    amend_dt = await wait_amend_order(order_id)
+        # 2️⃣ Amend
+        order.lmtPrice = round(amended_price, 2)
+        t_cmd_amend = now_ns()
+        ib.placeOrder(contract, order)  # same orderId → modify
+        amend_dt = await wait_amend_order(order_id)
 
-    exch_ts_ns = int(amend_dt.timestamp() * 1e9)
-    latency_ms_ns = (exch_ts_ns - t_cmd_amend) / 1e6
+        exch_ts_ns = int(amend_dt.timestamp() * 1e9)
+        latency_ms = (exch_ts_ns - t_cmd_amend) / 1e6
+        latencies_ms.append(latency_ms)
+        ib.cancelOrder(order)
+
+        await asyncio.sleep(0.5)
 
     results.append({
         "experiment": "aggressive_order_amend",
-        "t_local_cmd": t_cmd_amend,
-        "t_exch_ack_ns": exch_ts_ns,
-        "latency_ms_ns": latency_ms_ns,
-        "new_limit": order.lmtPrice,
+        "latencies_ms": np.average(latencies_ms),
     })
 
 
 async def defensive_order_amend():
     """Place 10 % below last close, then amend to 15 % below."""
-    last_close = await last_1m_close()
-    initial_price = last_close * (1 - INIT_PCT_B)
-    amended_price = last_close * (1 - AMEND_PCT_B)
+    latencies_ms = []
 
-    order_id = ib.client.getReqId()
-    order = Order(orderId=order_id, action="BUY", totalQuantity=1,
-                  orderType="LMT", lmtPrice=round(initial_price, 2))
+    for _ in range(SAMPLES_PER_EXPERIMENT):
+        last_close = await last_1m_close()
+        initial_price = last_close * (1 - INIT_PCT_B)
+        amended_price = last_close * (1 - AMEND_PCT_B)
 
-    # 1️⃣ Submit
-    ib.placeOrder(contract, order)
-    await wait_open_order(order_id)
+        order_id = ib.client.getReqId()
+        order = Order(orderId=order_id, action="BUY", totalQuantity=1,
+                      orderType="LMT", lmtPrice=round(initial_price, 2))
 
-    # 2️⃣ Amend
-    order.lmtPrice = round(amended_price, 2)
-    t_cmd_amend = now_ns()
-    ib.placeOrder(contract, order)
-    amend_dt = await wait_amend_order(order_id)
+        # 1️⃣ Submit
+        ib.placeOrder(contract, order)
+        await wait_open_order(order_id)
 
-    exch_ts_ns = amend_dt.timestamp() * 1e9
-    latency_ms_ns = (exch_ts_ns - t_cmd_amend) / 1e6
+        # 2️⃣ Amend
+        order.lmtPrice = round(amended_price, 2)
+        t_cmd_amend = now_ns()
+        ib.placeOrder(contract, order)
+        amend_dt = await wait_amend_order(order_id)
+
+        exch_ts_ns = amend_dt.timestamp() * 1e9
+        latency_ms = (exch_ts_ns - t_cmd_amend) / 1e6
+        latencies_ms.append(latency_ms)
+        ib.cancelOrder(order)
+
+        await asyncio.sleep(0.5)
 
     results.append({
         "experiment": "defensive_order_amend",
-        "t_local_cmd": t_cmd_amend,
-        "t_exch_ack_ns": exch_ts_ns,
-        "latency_ms_ns": latency_ms_ns,
-        "new_limit": order.lmtPrice,
+        "latencies_ms": np.average(latencies_ms),
     })
 
 
@@ -204,42 +213,47 @@ async def aggressive_manual_order_amend():
     Place 15 % below last close, then *simultaneously* cancel & submit
     a new order 10 % below last close.
     """
-    last_close = await last_1m_close()
-    initial_price = last_close * (1 - INIT_PCT_C)
-    new_price = last_close * (1 - NEW_PCT_C)
+    latencies_ms = []
 
-    # Original order
-    orig_id = ib.client.getReqId()
-    orig = Order(orderId=orig_id, action="BUY", totalQuantity=1,
-                 orderType="LMT", lmtPrice=round(initial_price, 2))
+    for _ in range(SAMPLES_PER_EXPERIMENT):
+        last_close = await last_1m_close()
+        initial_price = last_close * (1 - INIT_PCT_C)
+        new_price = last_close * (1 - NEW_PCT_C)
 
-    ib.placeOrder(contract, orig)
-    await wait_open_order(orig_id)
+        # Original order
+        orig_id = ib.client.getReqId()
+        orig = Order(orderId=orig_id, action="BUY", totalQuantity=1,
+                     orderType="LMT", lmtPrice=round(initial_price, 2))
 
-    # New order
-    new_id = ib.client.getReqId()
-    new_order = Order(orderId=new_id, action="BUY", totalQuantity=1,
-                      orderType="LMT", lmtPrice=round(new_price, 2))
+        ib.placeOrder(contract, orig)
+        await wait_open_order(orig_id)
 
-    # 1️⃣ Cancel-Replace
-    t_cmd = now_ns()
-    ib.cancelOrder(orig)
-    ib.placeOrder(contract, new_order)
+        # New order
+        new_id = ib.client.getReqId()
+        new_order = Order(orderId=new_id, action="BUY", totalQuantity=1,
+                          orderType="LMT", lmtPrice=round(new_price, 2))
 
-    # Wait for both cancel acknowledgement *and* new order ack
-    res = await asyncio.gather(wait_open_order(orig_id), wait_open_order(new_id), return_exceptions=True)
-    cancel_dt = res[0]
-    open_dt = res[1]
+        # 1️⃣ Cancel-Replace
+        t_cmd = now_ns()
+        ib.cancelOrder(orig)
+        ib.placeOrder(contract, new_order)
 
-    exch_ts_ns = max(cancel_dt.timestamp() * 1e9, open_dt.timestamp() * 1e9)
-    latency_ms_ns = (exch_ts_ns - t_cmd) / 1e6
+        # Wait for both cancel acknowledgement *and* new order ack
+        res = await asyncio.gather(wait_open_order(orig_id), wait_open_order(new_id), return_exceptions=True)
+        cancel_dt = res[0]
+        open_dt = res[1]
+
+        exch_ts_ns = max(cancel_dt.timestamp() * 1e9, open_dt.timestamp() * 1e9)
+        latency_ms_ns = (exch_ts_ns - t_cmd) / 1e6
+        latencies_ms.append(latency_ms_ns)
+
+        ib.cancelOrder(new_order)
+
+        await asyncio.sleep(0.5)
 
     results.append({
         "experiment": "aggressive_manual_order_amend",
-        "t_local_cmd": t_cmd,
-        "t_exch_ack_ns": exch_ts_ns,
-        "latency_ms_ns": latency_ms_ns,
-        "new_limit": new_order.lmtPrice,
+        "latencies_ms": np.average(latencies_ms),
     })
 
 
@@ -255,12 +269,13 @@ async def main():
     await defensive_order_amend()
     await aggressive_manual_order_amend()
 
-    df = pd.DataFrame(results, columns=[
-        "experiment", "latency_ms_ns", "t_local_cmd", "t_exch_ack_ns", "new_limit"
-    ])
+    df = pd.DataFrame(results)
+    df.columns = [
+        "experiment", f"latencies_ms (ave. over {SAMPLES_PER_EXPERIMENT})"
+    ]
     pd.options.display.float_format = "{:.3f}".format
     print("\n=== Latency results (ms) ===")
-    print(df[["experiment", "latency_ms_ns"]])
+    print(df)
 
     print("\nFull details:")
     print(df.to_string(index=False))
