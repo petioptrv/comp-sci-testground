@@ -14,8 +14,8 @@ from typing import Tuple, Deque, List
 import numpy
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
+import sbe
 import simplefix
 import websocket
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -32,11 +32,14 @@ TRADES_SAMPLE_SIZE = 2000
 WEBSOCKET_ENDPOINT = (
     "wss://stream.binance.com:9443/ws/{symbol}@trade"
 )  # Binance public trade stream
+SBE_ENDPOINT = (
+    "wss://stream-sbe.binance.com/ws/{symbol}@trade"
+)
 CLOCK_SYNC_SAMPLES = 15
 FIX_HOSTNAME = "fix-md.binance.com"
 FIX_PORT = 9000
-FIX_API_KEY = os.environ.get("BINANCE_FIX_API_KEY")
-PRIVATE_KEY_PATH = os.environ.get("BINANCE_FIX_PRIVATE_KEY_PATH")
+ED25519_API_KEY = os.environ.get("BINANCE_ED25519_API_KEY")
+PRIVATE_KEY_PATH = os.environ.get("BINANCE_ED25519_PRIVATE_KEY_PATH")
 CA_CERT_PATH = os.environ.get("CA_CERT_PATH")
 BASE_SENDER_COMP_ID_NUMERIC_PORTION = int(time.time()) % 1_000
 
@@ -47,6 +50,11 @@ BASE_SENDER_COMP_ID_NUMERIC_PORTION = int(time.time()) % 1_000
 def make_ws_url(symbol: str) -> str:
     """Return the full websocket URL for the given symbol."""
     return WEBSOCKET_ENDPOINT.format(symbol=symbol.lower())
+
+
+def make_sbe_url(symbol: str) -> str:
+    """Return the full SBE URL for the given symbol."""
+    return SBE_ENDPOINT.format(symbol=symbol.lower())
 
 
 class TradeAggregator:
@@ -108,6 +116,65 @@ class WSClient(Process):
         while not self.stop_event.is_set():
             try:
                 self.ws.run_forever(ping_interval=20, ping_timeout=10)
+            except Exception as e:
+                print(f"[Client {self.client_id}] run_forever exception: {e}")
+                time.sleep(1)  # brief back‑off before reconnect
+
+        # Graceful shutdown
+        try:
+            self.ws.close()
+        except Exception:
+            pass
+
+
+class SBEClient(Process):
+    client_type = "sbe"
+
+    def __init__(
+        self,
+        client_id: int,
+        symbol: str,
+        out_queue: Queue,
+        stop_event: Event,
+        time_offset: float,
+    ):
+        super().__init__(daemon=True)
+        self.client_id = client_id
+        self.url = make_sbe_url(symbol)
+        self.out_queue = out_queue
+        self.stop_event = stop_event
+        self.ws: websocket.WebSocketApp | None = None
+        self.time_offset = time_offset
+        self.schema = sbe.Schema.parse("stream_3_0.xml")
+
+    def run(self):
+        def on_message(ws, message):
+            recv_ts = time.time() + self.time_offset
+            pkt = self.schema.decode(message)
+            print(pkt.value)
+            try:
+                data = json.loads(message)
+                trade_id = data["t"]
+                event_ts = data["E"] * 1e-3
+            except (KeyError, json.JSONDecodeError):
+                return  # skip malformed
+            self.out_queue.put_nowait((trade_id, event_ts, self.client_id, recv_ts, self.client_type))
+
+        def on_error(ws, error):
+            print(f"[Client {self.client_id}] error: {error}")
+
+        self.ws = websocket.WebSocketApp(
+            self.url,
+            header=[f"X-MBX-APIKEY: {ED25519_API_KEY}"],
+            on_message=on_message,
+            on_error=on_error,
+            on_ping=lambda ws, data: ws.pong(data),
+        )
+
+        # Run until stop_event is set; ping_interval keeps the connection alive.
+        while not self.stop_event.is_set():
+            try:
+                self.ws.run_forever(ping_interval=15, ping_timeout=10)
             except Exception as e:
                 print(f"[Client {self.client_id}] run_forever exception: {e}")
                 time.sleep(1)  # brief back‑off before reconnect
@@ -194,7 +261,7 @@ class FIXClient(Process):
         msg.append_pair(98, 0)
         msg.append_pair(108, 30)
         msg.append_pair(141, "Y")
-        msg.append_pair(553, FIX_API_KEY)
+        msg.append_pair(553, ED25519_API_KEY)
         msg.append_pair(25035, 1)  # UNORDERED
         return msg
 
@@ -336,14 +403,18 @@ def main():
         for i in range(NUM_CLIENTS)
     ]
     fix_clients = [
-        FIXClient(i, SYMBOL, out_queue, stop_event, time_synchronizer.time_offset_ms * 1e-3)
-        for i in range(NUM_CLIENTS, NUM_CLIENTS * 2)
+        # FIXClient(i, SYMBOL, out_queue, stop_event, time_synchronizer.time_offset_ms * 1e-3)
+        # for i in range(NUM_CLIENTS, NUM_CLIENTS * 2)
     ]
-    clients = ws_clients + fix_clients
+    sbe_clients = [
+        # SBEClient(i, SYMBOL, out_queue, stop_event, time_synchronizer.time_offset_ms * 1e-3)
+        # for i in range(NUM_CLIENTS * 2, NUM_CLIENTS * 3)
+    ]
+    clients = ws_clients + fix_clients + sbe_clients
     for c in clients:
         c.start()
 
-    aggregator = TradeAggregator(expected_clients=len(ws_clients) + len(fix_clients))
+    aggregator = TradeAggregator(expected_clients=len(clients))
     delays_per_client: dict[str, dict[int, list[float]]] = {
         WSClient.client_type: defaultdict(list),
         FIXClient.client_type: defaultdict(list),
@@ -419,53 +490,10 @@ def main():
         if rows:
             df = pd.DataFrame(rows)
             fig_delay = px.box(df, x="client", y="delay_ms", points="all",
-                               title=f"Per‑trade latency for {client_type} local machine clients (ave delay = {ave_delay:.3f} ms)")
+                               title=f"Binance per‑trade latency for {client_type} EC2 AP clients (ave delay = {ave_delay:.3f} ms)")
             fig_delay.update_layout(xaxis_title="Client ID", yaxis_title="Delay (ms)", xaxis=dict(tickmode="linear"))
             fig_delay.show()
             fig_delay.write_html(f"{report_ts}_{client_type}_delay_plot.html")
-
-    # ts_delay_df = pd.DataFrame(ts_delay_records)
-    # bin_width_ms = 100
-    # if not ts_delay_df.empty:
-    #     # Convert timestamps to bin indices
-    #     t0 = ts_delay_df["ts"].min()
-    #     ts_delay_df["bin"] = ((ts_delay_df["ts"] - t0) * 1000 // bin_width_ms).astype(int)
-    #
-    #     # Group by time bin
-    #     grouped = ts_delay_df.groupby("bin").agg(
-    #         order_count=("ts", "count"),
-    #         ave_delay_ms=("delay", "mean"),
-    #         start_time=("ts", "min"),
-    #     ).reset_index()
-    #
-    #     # Plot: order count vs average latency
-    #     fig = px.scatter(
-    #         grouped,
-    #         x="order_count",
-    #         y="ave_delay_ms",
-    #         title="Order Volume vs Average Latency (Binned 200ms)",
-    #         labels={
-    #             "order_count": "Orders in 200ms Window",
-    #             "ave_delay_ms": "Average Delay (ms)"
-    #         },
-    #     )
-    #     fig.show()
-    #
-    #     ts_delay_df["bin"] = ((ts_delay_df["ts"] - t0) * 1000 // bin_width_ms).astype(int)
-    #     delay_over_time = ts_delay_df.groupby("bin").agg(
-    #         ave_delay_ms=("delay", "mean"),
-    #         start_time=("ts", "min")
-    #     ).reset_index()
-    #
-    #     fig_time = px.line(
-    #         delay_over_time,
-    #         x="start_time",
-    #         y="ave_delay_ms",
-    #         title="Average Latency Over Time (100ms bins)",
-    #         labels={"start_time": "Time", "ave_delay_ms": "Average Delay (ms)"}
-    #     )
-    #     fig_time.update_traces(mode="lines+markers")
-    #     fig_time.show()
 
 
 if __name__ == "__main__":

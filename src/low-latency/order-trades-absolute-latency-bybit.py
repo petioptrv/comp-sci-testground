@@ -271,8 +271,14 @@ def main():
         ]
         if rows:
             df = pd.DataFrame(rows)
-            fig_delay = px.box(df, x="client", y="delay_ms", points="all",
-                               title=f"Per‑trade latency for {client_type} local machine clients (ave delay = {ave_delay:.3f} ms)")
+            fig_delay = px.box(
+                df,
+                x="client",
+                y="delay_ms",
+                points="all",
+                title=f"Bybit per‑trade latency for {client_type} EC2 SG clients (ave delay = {ave_delay:.3f} ms)",
+                color_discrete_sequence=["red"],
+            )
             fig_delay.update_layout(xaxis_title="Client ID", yaxis_title="Delay (ms)", xaxis=dict(tickmode="linear"))
             fig_delay.show()
             fig_delay.write_html(f"{report_ts}_{client_type}_delay_plot.html")
